@@ -1,51 +1,11 @@
 {
-    "url": "https://oms.htdkgroup.com/#/",
-    "username": "yuyx",
-    "password": "Welcome1",
+    "url": "",
+    "username": "",
+    "password": "",
     "api_key": "YOUR_API_KEY",
     "integration_flow": "所有",
     "integration_flows": [
-        "所有",
-        "T1033_接收SAP盘点信息",
-        "T1026_接收爱尔盘点信息",
-        "T1029_回传销售出库信息_华夏",
-        "T1028_回传入库验收信息_华夏",
-        "T1023_接收SAP出库信息_华夏",
-        "T1022_接收SAP验收信息_华夏",
-        "T1021_接收SAP收货信息_华夏",
-        "T1031_回传快递单号信息_华夏",
-        "T1025_供爱尔现存量查询",
-        "T1015_接收爱尔销售关闭信息",
-        "T1006_回传爱尔验收信息",
-        "T1008_回传爱尔出库信息",
-        "T1103_回传爱尔退货申请单结果_001上市",
-        "T1011_回传爱尔快递信息",
-        "T1020_获取BIDUI",
-        "T1107_回传爱尔采退出库回调",
-        "T1117_回传爱尔退货申请单结果_006合伙",
-        "T1014_接收爱尔采购关闭信息",
-        "T1106_回传高视验收信息",
-        "T1105_回传高视其他出库单",
-        "T1104_回传爱尔红字采购入库单结果",
-        "T1102_推送销售意向单到高视",
-        "T1001_接收爱尔意向采购信息",
-        "T1123_回传高视其他出库单负数",
-        "T1121_回传高视寄售退回",
-        "T1120_推送销退出库信息到高视",
-        "T1101_推送销售出库信息到高视",
-        "T1108_回传高视寄售出库传转库单",
-        "T1004_接收高视销售信息",
-        "T1001_接收高视采购信息",
-        "T1003_推送SAP采购订单",
-        "T1007_推送SAP销售订单",
-        "T1009_接收SAP验收信息",
-        "T1002_接收SAP收货信息",
-        "T1012_接收SAP采购信息",
-        "T1001_接收爱尔采购信息",
-        "T1005_接收SAP出库信息",
-        "T1013_接收SAP销售信息",
-        "T1004_接收爱尔销售信息",
-        "T1010_接收SAP快递信息"
+        "所有"
     ],
     "whitelist": [
         "未查询到采购订单信息",
@@ -53,16 +13,17 @@
         "未查询到销售出库单"
     ],
     "wechat": {
-        "corpid": "ww63e0a50d0a9a6b04",
-        "corpsecret": "5cWws8M42A_pQjMjT2QS-dtdu7DgiiwrqBVGqvP5Psk",
-        "agentid": "1000008",
-        "token": "E8wCuobt5BE8y3yAyKQxenY",
-        "aes_key": "vQJ3RRhodLWtZNYjri6czlLJyioiTjHwLKzVKm3v94D"
+        "corpid": "",
+        "corpsecret": "",
+        "agentid": "",
+        "token": "",
+        "aes_key": ""
     },
     "lark": {
-        "app_id": "cli_a9119d07a178dcb5",
-        "app_secret": "6x7jPyRRujFHIgQnA7IBEOX8p6vuFIIM",
-        "verification_token": "j7JBqtL0udERqQIRyPkzBZRqieT8ZXZp",
-        "encrypt_key": "SuCKvY35Nk29zcurHtrOmeBvZAtsdAWr"
+        "app_id": "",
+        "app_secret": "",
+        "verification_token": "",
+        "encrypt_key": ""
     }
+
 }
