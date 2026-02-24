@@ -87,3 +87,28 @@ class WeChatUtils:
         }
         resp = requests.post(url, json=data).json()
         return resp.get("errcode") == 0
+
+    def send_markdown(self, user_id, content):
+        """发送 Markdown 格式文本给指定用户"""
+        token = self.get_access_token()
+        if not token:
+            return False
+
+        url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
+        data = {
+            "touser": user_id,
+            "msgtype": "markdown",
+            "agentid": self.agentid,
+            "markdown": {
+                "content": content
+            },
+            "safe": 0
+        }
+        try:
+            resp = requests.post(url, json=data).json()
+            if resp.get("errcode") != 0:
+                print(f"❌ 企微发送 Markdown 失败: {resp}")
+            return resp.get("errcode") == 0
+        except Exception as e:
+            print(f"❌ 企微发送 Markdown 异常: {e}")
+            return False

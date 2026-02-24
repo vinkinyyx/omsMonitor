@@ -10,8 +10,36 @@ import subprocess
 import time
 import sys
 from datetime import datetime
+import re
 
 app = FastAPI()
+
+# 简单的本地防重缓存 (Message ID -> 时间戳)
+processed_msg_ids = {}
+
+# 企微多轮对话状态机，结构：{ user_id: {"step": "START_DATE", "retries": 0, "data": {}} }
+wechat_sessions = {}
+
+def clean_expired_msg_ids():
+    current_time = time.time()
+    # 清理 5 分钟前的记录
+    expired_keys = [k for k, v in processed_msg_ids.items() if current_time - v > 300]
+    for k in expired_keys:
+        del processed_msg_ids[k]
+
+def parse_date(date_str):
+    """尝试容错解析用户输入的日期，转为 YYYY-MM-DD，并且校验真实性"""
+    date_str = date_str.strip().replace(" ", "").replace("/", "-")
+    # 匹配 20260226 (纯数字)
+    if re.match(r"^\d{8}$", date_str):
+        date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+    
+    try:
+        # 使用 datetime 强制转换，既能自动补齐 2026-2-2，也能过滤如 2026-13-40 这类非法日期
+        valid_date = datetime.strptime(date_str, "%Y-%m-%d")
+        return valid_date.strftime("%Y-%m-%d")
+    except ValueError:
+        return None
 
 def load_config():
     with open("config.json", "r", encoding="utf-8") as f:
@@ -42,10 +70,10 @@ async def verify_url(
     print(f"URL 验证失败，错误代码: {ret}")
     return "error"
 
-def run_inspection_and_reply(user_id: str):
+def run_inspection_and_reply(user_id: str, user_data: dict = None):
     """后台执行巡检并发送实时进度及文件"""
     print(f"开始为用户 {user_id} 执行巡检任务...")
-    utils.send_text(user_id, "🚀 收到指令，正在启动日志巡检...")
+    utils.send_text(user_id, "收到指令，正在启动日志巡检，请稍候...")
     
     # 初始化日志目录
     os.makedirs("logs", exist_ok=True)
@@ -53,6 +81,10 @@ def run_inspection_and_reply(user_id: str):
     log_file_path = os.path.join("logs", f"task_{task_time}.txt")
     
     try:
+        env = os.environ.copy()
+        if user_data:
+            env["DYNAMIC_PARAMS"] = json.dumps(user_data)
+
         # 使用 Popen 以便实时获取 stdout
         process = subprocess.Popen(
             [sys.executable, "main.py"],
@@ -60,6 +92,7 @@ def run_inspection_and_reply(user_id: str):
             stderr=subprocess.STDOUT,
             text=True,
             encoding='utf-8',
+            env=env,
             bufsize=1
         )
         
@@ -86,37 +119,28 @@ def run_inspection_and_reply(user_id: str):
         process.wait()
         
         excel_path = "error_logs.xlsx"
-        txt_path = "error_logs.txt"
+        excel_path = "error_logs.xlsx"
         
-        has_sent_file = False
-        
-        if os.path.exists(txt_path):
-            media_id_txt = utils.upload_file(txt_path)
-            if media_id_txt:
-                utils.send_file(user_id, media_id_txt)
-                has_sent_file = True
+        # 1. 企微发送原生 Markdown 战报卡片
+        summary_path = "report_summary.md"
+        if os.path.exists(summary_path):
+            try:
+                with open(summary_path, "r", encoding="utf-8") as f:
+                    md_content = f.read()
+                # 企微软原生不支持带颜色的 config，但原生支持 markdown 格式解析
+                utils.send_markdown(user_id, md_content)
+            except Exception as e:
+                print(f"读取或发送摘要战报失败: {e}")
+        else:
+            utils.send_text(user_id, "巡检已执行完毕。")
 
+        # 2. 如果有文件，作为附件紧跟着发送
         if os.path.exists(excel_path):
             media_id_xls = utils.upload_file(excel_path)
             if media_id_xls:
                 utils.send_file(user_id, media_id_xls)
-                has_sent_file = True
-
-        # ===== 追加发送摘要战报逻辑 =====
-        summary_path = "report_summary.md"
-        if os.path.exists(summary_path):
-            try:
-                with open(summary_path, "r", encoding="utf-8") as rf:
-                    summary_content = rf.read()
-                # 企微直接通过文本渠道推送生成的 markdown 内容（企微会部分自动解析）
-                utils.send_text(user_id, summary_content)
-            except Exception as e:
-                print(f"读取或发送摘要战报失败: {e}")
-                
-        if has_sent_file:
-            utils.send_text(user_id, "✅ 巡检完成，以上是为您自动生成的日志与报表文件。")
-        else:
-            utils.send_text(user_id, "ℹ️ 巡检完成，但由于系统环境原因，未找到可发送的报告文件。")
+            else:
+                utils.send_text(user_id, "⚠️ 巡检已完成，但长篇 Excel 报告上传企微临时素材库失败。")
             
     except Exception as e:
         print(f"执行巡检出错: {e}")
@@ -140,15 +164,110 @@ async def handle_message(
         msg_type = root.find("MsgType").text
         
         if msg_type == "text":
+            # 拿到 MsgId 防重
+            msg_id = root.find("MsgId").text
+            
+            clean_expired_msg_ids()
+            if msg_id in processed_msg_ids:
+                return "success"
+            processed_msg_ids[msg_id] = time.time()
+
             content = root.find("Content").text.strip()
             print(f"收到用户 {user_id} 的消息: {content}")
             
-            if content in ["开始巡检", "巡检", "run"]:
-                # 使用 BackgroundTasks 异步运行，避免请求超时
-                background_tasks.add_task(run_inspection_and_reply, user_id)
-                return "success"
+            # --- 多轮会话路由 ---
+            if user_id in wechat_sessions:
+                session = wechat_sessions[user_id]
+                step = session["step"]
+                
+                # 用户主动取消
+                if content.lower() in ['取消', '取消巡检', 'cancel', '退出']:
+                    del wechat_sessions[user_id]
+                    utils.send_text(user_id, "已为您取消本次巡检引导。")
+                    return "success"
+                    
+                if step == "START_DATE":
+                    if content.lower() in ["无", "跳过", "今天"]:
+                        session["data"]["start_date"] = None
+                        session["step"] = "END_DATE"
+                        session["retries"] = 0
+                        utils.send_text(user_id, "✅ 已跳过开始日期。请回复「结束日期」(如: 2026-02-15)。若不需要，请回复「无」或「跳过」:")
+                    else:
+                        parsed = parse_date(content)
+                        if parsed:
+                            session["data"]["start_date"] = parsed
+                            session["step"] = "END_DATE"
+                            session["retries"] = 0
+                            utils.send_text(user_id, f"✅ 已记录开始日期为 {parsed}。请回复「结束日期」(如: 2026-02-15)。若不需要，请回复「无」或「跳过」:")
+                        else:
+                            session["retries"] += 1
+                            if session["retries"] >= 3:
+                                del wechat_sessions[user_id]
+                                utils.send_text(user_id, "❌ 多次输入错误，为防止卡死，已自动退出巡检引导。请重新输入“巡检”唤起。")
+                            else:
+                                utils.send_text(user_id, "⚠️ 日期格式无法被系统识别，请按照「YYYY-MM-DD」或者「20260212」格式重新输入！(若想退出请回复 取消)")
+                
+                elif step == "END_DATE":
+                    if content.lower() in ["无", "跳过", "今天"]:
+                        session["data"]["end_date"] = None
+                        session["step"] = "STATUS"
+                        session["retries"] = 0
+                        utils.send_text(user_id, "✅ 已跳过结束日期。\n请回复想要查询的「状态」：\n- 回复 `1` (或 `报错`): 只查询报错记录 (推荐)\n- 回复 `0` (或 `成功`): 只查询成功记录\n- 回复 `2` (或 `全部`): 拉取所有请求并在本地过滤")
+                    else:
+                        parsed = parse_date(content)
+                        if parsed:
+                            session["data"]["end_date"] = parsed
+                            session["step"] = "STATUS"
+                            session["retries"] = 0
+                            utils.send_text(user_id, f"✅ 已记录结束日期为 {parsed}。\n请回复想要查询的「状态」：\n- 回复 `1` (或 `报错`): 只查询报错记录 (推荐)\n- 回复 `0` (或 `成功`): 只查询成功记录\n- 回复 `2` (或 `全部`): 拉取所有请求并在本地过滤")
+                        else:
+                            session["retries"] += 1
+                            if session["retries"] >= 3:
+                                del wechat_sessions[user_id]
+                                utils.send_text(user_id, "❌ 多次输入错误，由于安全策略，已自动退出向导。")
+                            else:
+                                utils.send_text(user_id, "⚠️ 日期格式无法被系统识别，请正确如 2026-02-28 格式重新输入:")
+                
+                elif step == "STATUS":
+                    status_map = {"1": "1", "报错": "1", "0": "0", "成功": "0", "2": "2", "全部": "2"}
+                    if content in status_map:
+                        session["data"]["status"] = status_map[content]
+                        session["step"] = "FLOW"
+                        session["retries"] = 0
+                        
+                        flows = config.get("integration_flows", ["所有"])
+                        flow_str = "\n".join([f"- {i+1}. {name}" for i, name in enumerate(flows)])
+                        utils.send_text(user_id, f"✅ 已确认状态过滤级别。\n最后一步，请告诉我您监控的「集成流」要求：\n您可以直接输入集成流名称关键词或下方序号，如果不需要过滤请回复「所有」或数字「1」:\n{flow_str}")
+                    else:
+                        session["retries"] += 1
+                        if session["retries"] >= 3:
+                            del wechat_sessions[user_id]
+                            utils.send_text(user_id, "❌ 多次输入错误，向导已退出。")
+                        else:
+                            utils.send_text(user_id, "⚠️ 无法识别。请明确回复数字 `1` (报错) 或 `2` (全部):")
+                
+                elif step == "FLOW":
+                    flows = config.get("integration_flows", ["所有"])
+                    selected_flow = "所有"
+                    
+                    if content.isdigit() and 1 <= int(content) <= len(flows):
+                        selected_flow = flows[int(content) - 1]
+                    else:
+                        selected_flow = content
+                    
+                    session["data"]["integration_flow"] = selected_flow
+                    user_params = session["data"]
+                    del wechat_sessions[user_id]
+                    
+                    utils.send_text(user_id, f"✅ 设定完毕！参数打包成功！引擎正在以此规则为您拉起无头浏览器...")
+                    background_tasks.add_task(run_inspection_and_reply, user_id, user_params)
             else:
-                utils.send_text(user_id, "⚠️ 输入指令有误，请向我发送「巡检」、「开始巡检」或「run」中的任意一个指令以启动巡检向导。")
+                if content in ["开始巡检", "巡检", "run"]:
+                    # 开启新的会话状态
+                    wechat_sessions[user_id] = {"step": "START_DATE", "retries": 0, "data": {}}
+                    utils.send_text(user_id, "收到指令。请回复您需要查询的「开始日期」(支持格式如 2026/02/12, 2026-02-12, 或 20260212)。若不需要指定开始日期(查询当天)，请回复「无」或「跳过」:")
+                else:
+                    utils.send_text(user_id, "⚠️ 未在巡检向导中。请向我发送「巡检」、「开始巡检」或「run」中的任意一个指令以启动交互向导。")
         
     return "success"
 

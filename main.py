@@ -34,7 +34,9 @@ def scrape_logs(config: dict) -> str:
 
         try:
             # 1. 打开登录页
-            url = config.get("url", "https://oms.htdkgroup.com/#/")
+            url = config.get("url")
+            if not url:
+                raise ValueError("请在 config.json 或环境变量中配置 url")
             page.goto(url, wait_until="networkidle")
             
             # 2. 登录流程
@@ -55,8 +57,11 @@ def scrape_logs(config: dict) -> str:
             except Exception:
                 pass
                 
-            username = config.get("username", "yuyx")
-            password = config.get("password", "Welcome1")
+            username = config.get("username")
+            password = config.get("password")
+            
+            if not username or not password:
+                raise ValueError("请在 config.json 或环境变量中配置 username 和 password")
             
             login_frame.locator("input#username").fill(username)
             login_frame.locator("input#password").fill(password)
@@ -469,6 +474,15 @@ def process_and_save_data(logs_text: str, config: dict):
             dropped = pre_len - len(df)
             if dropped > 0:
                 print(f"[PROGRESS] 🧹 白名单过滤：命中排除词汇，剔除 {dropped} 条，剩余 {len(df)} 条", flush=True)
+
+        # 专属屏蔽：“华夏”相关集成流直接强制抛弃
+        flow_col = next((c for c in df.columns if '集成流' in c), None)
+        if flow_col and not df.empty:
+            pre_len = len(df)
+            df = df[~df[flow_col].str.contains("华夏", na=False, regex=False)]
+            dropped = pre_len - len(df)
+            if dropped > 0:
+                print(f"[PROGRESS] 🧹 系统过滤：强制屏蔽“华厦”相关流，剔除 {dropped} 条，剩余 {len(df)} 条", flush=True)
 
         # 日期区间过滤
         time_col = next((c for c in df.columns if '创建时间' in c), None)
